@@ -6,241 +6,202 @@
 #include <pthread.h>
 #include <ctype.h>
 
-typedef struct
-{
+typedef struct {
 	int row;
 	int col;
 	int(*sudoku_grid)[9];
-}
-parameters;
+} parameters;
 
 void *validateSubgrid(void*);
 void *validateRows(void*);
 void *validateCols(void*);
-int readSudokuGrid(int(*grid)[9], int, FILE *);
+int readSudokuGrid(int(*grid)[9], FILE *);
 
 #define NTHREADS 11
 
-int main(int argc, char *argv[])
-{
-	if (argc < 2)
-	{
-		fprintf(stderr, "Usage: executable-name[input-file]\n");
+int main(int argc, char *argv[]) {
+	if (argc < 2) {
+		fprintf(stderr, "Usage: executable-name [input-file]\n");
 		exit(EXIT_FAILURE);
 	}
 
 	int sudoku_grid[9][9];
-	int n_grids;
 	FILE *fp = fopen(argv[1], "r");
-
-	// Read number of sudoku grids to validate
-	fscanf(fp, "%d", &n_grids);
-	fseek(fp, 1, SEEK_CUR);	// Seek past newline
 
 	// Initialize parameters for subgrid evaluation threads
 	parameters *data[9];
 	int row, col, i = 0;
-	for (row = 0; row < 9; row += 3)
-	{
-		for (col = 0; col < 9; col += 3, ++i)
-		{
+
+	for (row = 0; row < 9; row += 3) {
+		for (col = 0; col < 9; col += 3, ++i) {
 			data[i] = (parameters*) malloc(sizeof(parameters));
-			if (data[i] == NULL)
-			{
+			if (data[i] == NULL) {
 				int err = errno;
 				puts("malloc failed");
 				puts(strerror(err));
 				exit(EXIT_FAILURE);
 			}
+
 			data[i]->row = row;
 			data[i]->col = col;
 			data[i]->sudoku_grid = sudoku_grid;
 		}
 	}
 
-	// Validate all sudoku grids in file
+	// Validate sudoku grid
 	pthread_t tid[NTHREADS];
-	int g, p, j, h, retCode, check_flag = 0, t_status[NTHREADS];
-	for (g = 1; g <= n_grids; ++g)
-	{
-		if (readSudokuGrid(sudoku_grid, g, fp))
-		{
-			puts("something happened reading the grid from the file");
-			exit(EXIT_FAILURE);
-		}
+	int p, j, h, retCode, check_flag = 0, t_status[NTHREADS];
 
-		// Create threads for subgrid validation 
-		for (p = 0; p < 9; ++p)
-		{
-			if ((retCode = pthread_create(&tid[p], NULL, validateSubgrid, (void*) data[p])))
-			{
-				fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
-				exit(EXIT_FAILURE);
-			}
-		}
+    if (readSudokuGrid(sudoku_grid, fp)) {
+        puts("Unable to read the grid from the file.");
+        exit(EXIT_FAILURE);
+    }
 
-		// Create threads for row and column validation
-		if ((retCode = pthread_create(&tid[9], NULL, validateRows, (void*) data[0])))
-		{
-			fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
-			exit(EXIT_FAILURE);
-		}
-		if ((retCode = pthread_create(&tid[10], NULL, validateCols, (void*) data[0])))
-		{
-			fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
-			exit(EXIT_FAILURE);
-		}
+    // Create threads for subgrid validation
+    for (p = 0; p < 9; ++p) {
+        if ((retCode = pthread_create(&tid[p], NULL, validateSubgrid, (void*) data[p]))) {
+            fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
+            exit(EXIT_FAILURE);
+        }
+    }
 
-		// Join all threads so main waits until the threads finish
-		for (j = 0; j < NTHREADS; ++j)
-		{
-			if ((retCode = pthread_join(tid[j], (void*) &t_status[j])))
-			{
-				fprintf(stderr, "Error - pthread_join() return code: %d\n", retCode);
-				exit(EXIT_FAILURE);
-			}
-		}
+    // Create thread for rows validation
+    if ((retCode = pthread_create(&tid[9], NULL, validateRows, (void*) data[0]))) {
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
+        exit(EXIT_FAILURE);
+    }
 
-		// Check the status returned by each thread
-		for (h = 0; h < NTHREADS; ++h)
-		{
-			if (t_status[h])
-			{
-				check_flag = 1;
-				break;
-			}
-		}
-		if (check_flag)
-		{
-			printf("Sudoku Puzzle: %d - Invalid\n", g);
-		}
-		else
-		{
-			printf("Sudoku Puzzle: %d - Valid\n", g);
-		}
-		check_flag = 0;
-	}	// End evaluation for loop
+    // Create thread for columns validation
+    if ((retCode = pthread_create(&tid[10], NULL, validateCols, (void*) data[0]))) {
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", retCode);
+        exit(EXIT_FAILURE);
+    }
+
+    // Join all threads so main waits until the threads finish
+    for (j = 0; j < NTHREADS; ++j) {
+        if ((retCode = pthread_join(tid[j], (void*) &t_status[j]))) {
+            fprintf(stderr, "Error - pthread_join() return code: %d\n", retCode);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Check the status returned by each thread
+    for (h = 0; h < NTHREADS; ++h) {
+        if (t_status[h]) {
+            check_flag = 1;
+            break;
+        }
+    }
+
+    if (check_flag) {
+        printf("Sudoku Puzzle is Invalid\n");
+    } else {
+        printf("Sudoku Puzzle is Valid\n");
+    }
 
 	// Free memory and close the file
 	int k;
-	for (k = 0; k < 9; ++k)
-	{
+	for (k = 0; k < 9; ++k) {
 		free(data[k]);
 	}
+
 	fclose(fp);
 
 	return 0;
 }
 
-void *validateSubgrid(void *data)
-{
+void *validateSubgrid(void *data) {
 	int digit_check[10] = { 0 };
 	parameters *params = (parameters*) data;
 	int i, j;
-	for (i = params->row; i < params->row + 3; ++i)
-	{
-		for (j = params->col; j < params->col + 3; ++j)
-		{
-			if (digit_check[params->sudoku_grid[i][j]] == 1)
-			{
-				return (void*) - 1; // Invalid sudoku subgrid
+
+	for (i = params->row; i < params->row + 3; ++i) {
+		for (j = params->col; j < params->col + 3; ++j) {
+			if (digit_check[params->sudoku_grid[i][j]] == 1) {
+                // Invalid sudoku subgrid
+				return (void*) - 1;
 			}
+
 			digit_check[params->sudoku_grid[i][j]] = 1;
 		}
 	}
-	return (void*) 0; // Valid sudoku subgrid
+
+    // Valid sudoku subgrid
+	return (void*) 0;
 }
 
-
-void *validateRows(void *data)
-{
+void *validateRows(void *data) {
 	int digit_check[10] = { 0 };
 	parameters *params = (parameters*) data;
 	int i, j;
-	for (i = 0; i < 9; ++i)
-	{
-		for (j = 0; j < 9; ++j)
-		{
-			if (digit_check[params->sudoku_grid[i][j]] == 1)
-			{
+
+	for (i = 0; i < 9; ++i) {
+		for (j = 0; j < 9; ++j) {
+			if (digit_check[params->sudoku_grid[i][j]] == 1) {
 				return (void*) - 1; // Invalid sudoku rows
 			}
+
 			digit_check[params->sudoku_grid[i][j]] = 1;
 		}
+
 		// Reinitialize check array for next row
 		memset(digit_check, 0, sizeof(int) *10);
 	}
-	return (void*) 0; // Valid sudoku rows
+
+    // Valid sudoku rows
+	return (void*) 0;
 }
 
 
-void *validateCols(void *data)
-{
+void *validateCols(void *data) {
 	int digit_check[10] = { 0 };
 	parameters *params = (parameters*) data;
 	int i, j;
-	for (i = 0; i < 9; ++i)
-	{
-		for (j = 0; j < 9; ++j)
-		{
-			if (digit_check[params->sudoku_grid[j][i]] == 1)
-			{
-				// Ensure the digit doesn't appear more than once in the subgrid
-				return (void*) - 1; // Invalid sudoku columns
+
+	for (i = 0; i < 9; ++i) {
+		for (j = 0; j < 9; ++j) {
+			if (digit_check[params->sudoku_grid[j][i]] == 1) {
+                // Invalid sudoku columns
+				return (void*) - 1;
 			}
+
 			digit_check[params->sudoku_grid[j][i]] = 1;
 		}
-		// Reinitalize check array for next column
+
+		// Reinitialize check array for next column
 		memset(digit_check, 0, sizeof(int) *10);
 	}
-	return (void*) 0; // Valid sudoku columns
+
+    // Valid sudoku columns
+	return (void*) 0;
 }
 
-int readSudokuGrid(int(*grid)[9], int grid_no, FILE *fp)
-{
-	int garbage;
-	fseek(fp, 0, SEEK_SET);
-	fscanf(fp, "%d", &garbage);
-	fseek(fp, 1, SEEK_CUR); // Seek to start of first sudoku grid
+int readSudokuGrid(int(*grid)[9], FILE *fp) {
+    // Seek beginning of file
+    fseek(fp, 0, SEEK_SET);
 
-	if (grid_no < 1)
-	{
-		puts("Not a valid grid number. Please specify a grid number > 0.");
-		return -1;
-	}
-	else if (grid_no > 1)
-	{
-		// Seek past newlines from previous grids
-		fseek(fp, 9 *(grid_no - 1), SEEK_CUR); // 10 newlines per grid when more than one grid
-	}
+    char entry;
+	int i = 0, j = 0;
 
-	fseek(fp, (grid_no - 1) *sizeof(char) *81, SEEK_CUR); // Seek to the start of the corresponding grid number
+    // Loop through digits in file
+	while ((fread(&entry, 1, 1, fp)) > 0) {
+        if (entry == '\n') continue;
+        if (entry == ' ') continue;
 
-	char entry;
-	int i = 0, j = 0, totalValues = 0;
-	while ((fread(&entry, 1, 1, fp)) > 0 && totalValues < 81)
-	{
-		// Read 81 digits from file: sudoku grid 9x9 = 81
-		if (entry != '\n')
-		{
-			// Ignore newline
-			if (isdigit(entry))
-			{ 	++totalValues;
-				grid[i][j] = entry - '0'; // Store integer representation
-				++j;
-				if (j == 9)
-				{
-					j = 0;
-					++i;
-				}
-			}
-			else
-			{
-				// A non-digit character was read
-				return -1;
-			}
+        if (isdigit(entry)) {
+            // Store integer representation
+            grid[i][j] = entry - '0';
+            ++j;
+            if (j == 9) {
+                j = 0;
+                ++i;
+            }
+        } else {
+            // A non-digit character was read
+            return -1;
 		}
 	}
 
-	return 0; // Successfully read sudoku grid from file
+    // Successfully read sudoku grid from file
+	return 0;
 }
