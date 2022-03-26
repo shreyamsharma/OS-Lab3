@@ -12,10 +12,12 @@ typedef struct {
 	int(*sudoku_grid)[9];
 } parameters;
 
+int validate(void*);
 void *validateSubgrid(void*);
 void *validateRows(void*);
 void *validateCols(void*);
 int readSudokuGrid(int(*grid)[9], FILE *);
+void solveSudokuGrid(int(*grid)[9], FILE *);
 
 #define NTHREADS 11
 
@@ -27,6 +29,8 @@ int main(int argc, char *argv[]) {
 
 	int sudoku_grid[9][9];
 	FILE *fp = fopen(argv[1], "r");
+
+    srand(time(NULL));
 
 	// Initialize parameters for subgrid evaluation threads
 	parameters *data[9];
@@ -49,8 +53,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Validate sudoku grid
-	pthread_t tid[NTHREADS];
-	int p, j, h, retCode, check_flag = 0, t_status[NTHREADS];
+    pthread_t tid[NTHREADS];
+    int p, j, h, retCode, t_status[NTHREADS];
 
     if (readSudokuGrid(sudoku_grid, fp)) {
         puts("Unable to read the grid from the file.");
@@ -86,26 +90,30 @@ int main(int argc, char *argv[]) {
     }
 
     // Check the status returned by each thread
+    int flag = 0;
     for (h = 0; h < NTHREADS; ++h) {
         if (t_status[h]) {
-            check_flag = 1;
+            flag = 1;
             break;
         }
     }
 
-    if (check_flag) {
+    if (flag) {
         printf("Sudoku Puzzle is Invalid\n");
+
+        // Brute force random solution
+        solveSudokuGrid(sudoku_grid, fp);
     } else {
         printf("Sudoku Puzzle is Valid\n");
     }
 
-	// Free memory and close the file
-	int k;
-	for (k = 0; k < 9; ++k) {
-		free(data[k]);
-	}
+    // Free memory and close the file
+    int k;
+    for (k = 0; k < 9; ++k) {
+        free(data[k]);
+    }
 
-	fclose(fp);
+    fclose(fp);
 
 	return 0;
 }
@@ -181,10 +189,10 @@ int readSudokuGrid(int(*grid)[9], FILE *fp) {
     fseek(fp, 0, SEEK_SET);
 
     char entry;
-	int i = 0, j = 0;
+    int i = 0, j = 0;
 
     // Loop through digits in file
-	while ((fread(&entry, 1, 1, fp)) > 0) {
+    while ((fread(&entry, 1, 1, fp)) > 0) {
         if (entry == '\n') continue;
         if (entry == ' ') continue;
 
@@ -199,9 +207,48 @@ int readSudokuGrid(int(*grid)[9], FILE *fp) {
         } else {
             // A non-digit character was read
             return -1;
-		}
-	}
+        }
+    }
 
     // Successfully read sudoku grid from file
-	return 0;
+    return 0;
+}
+
+void solveSudokuGrid(int(*grid)[9], FILE *fp) {
+    // Seek beginning of file
+    fseek(fp, 0, SEEK_SET);
+
+    char entry;
+    int i = 0, j = 0;
+
+    // Loop through digits in file
+    while ((fread(&entry, 1, 1, fp)) > 0) {
+        if (entry == '\n') continue;
+        if (entry == ' ') continue;
+
+        if (isdigit(entry)) {
+            int digit = entry - '0';
+
+            if (digit == 0) {
+                grid[i][j] = (rand() % 9) + 1;
+            }
+
+            ++j;
+            if (j == 9) {
+                j = 0;
+                ++i;
+            }
+        }
+    }
+
+    FILE *sfp = fopen("solution.txt","w");
+
+    for (int row = 0; row < 9; row++) {
+        for (int column = 0; column < 9; column++) {
+            fprintf(sfp, "%d ", grid[row][column]);
+            if (column == 8) fprintf(sfp, "\n");
+        }
+    }
+
+    fclose(sfp);
 }
